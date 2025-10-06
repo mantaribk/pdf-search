@@ -1,0 +1,18 @@
+You are given the following page of legal text and the numeric tokens extracted from it.
+
+Page {page_number} Text:
+{page_text}
+
+Numbers:
+{numbers_json}
+
+For each number, output a JSON array "results" of objects:
+- raw_value: the original token
+- formatted_value: normalized value (e.g. remove commas, standardize date)
+- semantic_label: one of [monetary, percentage, date, performance_multiplier, granted_units, time_period, address_number, uuid, code_section, unknown]
+- unit: the unit symbol if any (%, $, x, units), else null
+- llm_confidence: confidence 0.0–1.0
+
+### Output Schema ###
+{format_instructions}
+ONLY output raw JSON without commentary.
