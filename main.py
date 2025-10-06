@@ -158,7 +158,7 @@ async def main():
         print(json.dumps(pr, indent=2))
 
     with open(args.output, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(page_results, f, indent=2)
 
     print(f"Results saved to {args.output}")
 
