@@ -1,0 +1,111 @@
+# Task: Extract Calculable Financial Metrics
+
+You are analyzing page {page_number} of a legal-financial document. Your job is to classify numeric values by their COMPUTATIONAL PURPOSE for financial calculations.
+
+## Input Data
+
+Page Text:
+{page_text}
+
+Numbers Extracted:
+{numbers_json}
+
+Each item in numbers_json is:
+<number_text>: (<page_text_place>, <regex_heuristic_label>)
+
+## Classification Categories
+
+Use EXACTLY one of these **semantic_category** labels:
+
+FINANCIAL VALUES (in dollars):
+- grant_amount: Dollar value of granted units/shares
+- participation_threshold: Minimum dollar threshold for benefits
+- fair_market_value: Per-unit or per-share valuation
+- total_commitment: Total fund or investment commitment
+
+PERFORMANCE METRICS (multipliers for calculations):
+- moic_tier_1, moic_tier_2, moic_tier_3: MOIC performance thresholds
+- irr_target: Internal rate of return targets
+- hurdle_rate: Minimum return requirements
+
+ALLOCATION PERCENTAGES (must sum to 100% within groups):
+- vesting_pct_tier_1, vesting_pct_tier_2, vesting_pct_tier_3: Vesting percentages by tier
+- ownership_percentage: Equity ownership percentages
+
+QUANTITATIVE UNITS (countable):
+- units_granted: Number of units/shares granted
+- shares_outstanding: Total shares for dilution calculations
+
+TEMPORAL VALUES (for date calculations):
+- grant_year, grant_month, grant_day: Grant date components
+- vesting_years: Years until vesting
+- term_length: Contract duration in years
+
+NON_CALCULABLE (reference only):
+- document_id
+- code_section
+- address_component
+- unknown
+
+## Output Format
+
+Return a single JSON object that matches exactly this structure:
+[
+    {{
+      "raw_value": "<string>",
+      "formatted_value": <int or float or null>,
+      "semantic_label": "<string>",
+      "semantic_category": "<string>",
+      "unit": "<string>",
+      "llm_confidence": <float>
+    }}
+]
+ONLY return valid JSON, NO commentary.
+
+### Critical Rules
+
+1. ONLY return valid JSON matching the schema above.
+2. `formatted_value` must be an **integer** or **float**, stripped of commas, currency symbols, percent signs, “x”, etc.
+3. Every input number must have exactly one output object in `results`.
+4. Use `syntax_label` and `context` to inform your classification.
+5. Set `llm_confidence` between 0.5–1.0; lower if uncertain.
+6. Do NOT include any additional keys or commentary.
+
+## Example
+
+**Input**
+{{
+    "198,542.89": ("No. of Units: 198,542.89 Class P Units", "granted_units"),
+    "2.0x": ("if MOIC exceeds 2.0x threshold", "performance_multiplier",
+    "30%": ("30% shall vest at tier 1", "percentage")
+}}
+
+**Output**
+{{
+  "classification": [
+    {{
+      "raw_value": "198,542.89",
+      "formatted_value": 198542.89,
+      "semantic_label": "grant_amount",
+      "semantic_category": "FINANCIAL VALUES",
+      "unit": "$",
+      "llm_confidence": 0.98
+    }},
+    {{
+      "raw_value": "2.0x",
+      "formatted_value": 2.0,
+      "semantic_label": "moic_tier_2",
+      "semantic_category": "PERFORMANCE METRICS",
+      "unit": "x",
+      "llm_confidence": 0.99
+    }},
+    {{
+      "raw_value": "30%",
+      "formatted_value": 30,
+      "semantic_label": "vesting_pct_tier_1",
+      "semantic_category": "ALLOCATION PERCENTAGES",
+      "unit": "%",
+      "llm_confidence": 0.97
+    }}
+  ]
+}}

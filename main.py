@@ -1,12 +1,14 @@
 import argparse
 import asyncio
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import CharacterTextSplitter
 import pdfplumber
 import re
 import json
-from classification_task import label_page_numbers
+from models.llm_model import ClassificationModel
+
+# from classification_task_langchain import label_page_numbers
+from classification_task_openai import label_page_numbers
 from tqdm.asyncio import tqdm_asyncio
+
 
 def enhanced_load_document(file):
     pages, coordinate_numbers = extract_numbers_with_coordinates(file)
@@ -64,10 +66,7 @@ def get_context(full_text: str, target: str, window: int = 60) -> str:
 
 def classify_number(text: str, context: str) -> str:
     """
-    Syntax classification including UUIDs and code sections.
-    Categories: list_index, performance_multiplier, monetary, percentage,
-                date, granted_units, time_period, address_number,
-                uuid, code_section, unknown.
+    Syntax classification including UUIDs and code sections. Categories: list_index, performance_multiplier, monetary, percentage, date, granted_units, time_period, address_number, uuid, code_section, unknown.
     """
     ADDRESS_TERMS = re.compile(
         r"\b(street|st\.?|ave|avenue|road|rd\.?|suite|ste\.?|blvd|boulevard|lane|ln\.?|drive|dr\.?|court|ct\.?)\b",
@@ -95,15 +94,16 @@ def classify_number(text: str, context: str) -> str:
     if "%" in t:
         return "percentage"
 
-    if ADDRESS_TERMS.search(ctx) and re.fullmatch(r"\d+", t):
-        return "address_number"
-
     if (
-        re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)
+        re.fullmatch(r"202\d", t)
         or re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", t)
         or re.search(r"[A-Za-z]{3,9} \d{1,2}, \d{4}", ctx)
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)
     ):
         return "date"
+
+    if ADDRESS_TERMS.search(ctx) and re.fullmatch(r"\d+", t):
+        return "address_number"
 
     if SECTION_REF_PATTERN.fullmatch(t) or SECTION_REF_PATTERN.search(ctx):
         return "code_section"
@@ -123,14 +123,30 @@ def classify_number(text: str, context: str) -> str:
 
     return "unknown"
 
+
+def build_grouped(records):
+    grouped = {}
+    for rec in records:
+        p = rec.get("page_number")
+        if p is None:
+            continue
+        value = rec.get("value")
+        if value is None:
+            continue
+        page_map = grouped.setdefault(p, {})
+        page_map[value] = (rec.get("context", ""), rec.get("syntax_label", "unknown"))
+    return grouped
+
+
 async def process_page(semaphore, page_num, page_text, records, model_id):
     async with semaphore:
         return await label_page_numbers(
             page_number=page_num,
             page_text=page_text,
             numbers_json=records,
-            model_id=model_id
+            model_id=model_id,
         )
+
 
 async def main():
     parser = argparse.ArgumentParser()
@@ -141,26 +157,52 @@ async def main():
     print(f"Processing: {args.path}")
     results = enhanced_load_document(args.path)
 
-    grouped = {}
-    for rec in results["coordinate_numbers"]:
-        grouped.setdefault(rec["page_number"], []).append(rec)
+    grouped = build_grouped(results["coordinate_numbers"])
 
-    semaphore = asyncio.Semaphore(5)
+    semaphore = asyncio.Semaphore(1)
     tasks = [
-        process_page(semaphore, page_num, results["pages"][page_num], records, "llama3.2:latest")
+        process_page(
+            semaphore,
+            page_num,
+            results["pages"][page_num],
+            records,
+            ClassificationModel.qwen.value,
+        )
         for page_num, records in grouped.items()
     ]
 
     page_results = []
-    for coro in tqdm_asyncio.as_completed(tasks, total=len(tasks), desc="Labeling pages"):
-        pr = await coro
-        page_results.append(pr)
-        print(json.dumps(pr, indent=2))
+    for coro in tqdm_asyncio.as_completed(
+        tasks, total=len(tasks), desc="Labeling pages numbers"
+    ):
+        page_number, pr = await coro
+        try:
+            parsed_pr = json.loads(pr)
+            dict_pr = parsed_pr.get("classification", [])
+            initial_keys = set(grouped[page_number].keys())
+            generated_keys = {parsed["raw_value"] for parsed in dict_pr}
+            formated_keys = {parsed["formatted_value"] for parsed in dict_pr}
+            if len(initial_keys) != len(generated_keys):
+                print(
+                    f"Processing page {page_number}: initially {len(initial_keys)}, returned {len(generated_keys)}"
+                )
+                for entry in initial_keys:
+                    if (
+                        entry.strip() not in generated_keys
+                        and entry.strip() not in formated_keys
+                    ):
+                        print(f"missed {entry}")
+            parsed_pr["page_number"] = page_number
+            page_results.append(parsed_pr)
+            print(json.dumps(parsed_pr, indent=2))
+        except json.decoder.JSONDecodeError:
+            page_results.append(pr)
 
     with open(args.output, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(page_results, f, indent=2)
 
     print(f"Results saved to {args.output}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
