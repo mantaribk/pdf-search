@@ -13,8 +13,9 @@ labels_prompt = (PROMPTS_DIR / "labels_prompt.txt").read_text(encoding="utf-8")
 class NumberResult(BaseModel):
     raw_value: str = Field(description="Original extracted value")
     formatted_value: int = Field(description="only number without other symbols and units")
-    semantic_label: str = Field(description="One of predefined labels")
-    unit: Optional[str] = Field(None, description="Unit symbol or None")
+    semantic_label: str = Field(..., description="One of predefined labels (e.g., grant_amount)")
+    semantic_category: str = Field(..., description="One of predefined categories (e.g., FINANCIAL VALUES)")
+    unit: Optional[str] = Field(None, description="$|%|x|units|null")
     llm_confidence: float = Field(description="0.0–1.0 confidence")
 
 class PageResults(BaseModel):
@@ -27,9 +28,11 @@ def get_number_labeler_chain(model_id: str):
     prompt = PromptTemplate(
         input_variables=["page_number", "page_text", "numbers_json"],
         template=labels_prompt,
-        partial_variables={"format_instructions": parser.get_format_instructions()},
+        partial_variables={
+            "format_instructions": JsonOutputParser(pydantic_object=PageResults).get_format_instructions()
+        },
     )
-    llm = ChatOllama(model=model_id, base_url=ollama_url, temperature=0, num_ctx=4096)
+    llm = ChatOllama(model=model_id, base_url=ollama_url, temperature=0, num_ctx=2048)
     return prompt | llm | parser
 
 
