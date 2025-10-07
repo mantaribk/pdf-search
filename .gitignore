@@ -8,4 +8,4 @@ capybarahermes-2.5-mistral-7b.Q4_K_M.gguf
 
 .DS_Store
 
-**/__pycache__
+**/__pycache__/**
